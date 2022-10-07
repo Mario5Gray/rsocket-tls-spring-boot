@@ -32,11 +32,22 @@ How ot use the [Java Keytool](https://docs.oracle.com/en/java/javase/17/docs/spe
 PEM or Privacy Enhanced Mail is a Base64 encoded DER certificate.  PEM certificates are frequently used for web servers as they can easily be translated into readable data using a simple text editor.  Generally when a PEM encoded file is opened in a text editor, it contains very distinct headers and footers.  Below are some examples of different files in PEM format.
 
 
+## How to utilize your PEM into Spring Boot
+
+## How to utilize KeyStores into Spring Boot
+
+## RSocket via Tcp and TLS
+
+## RSocket via WS* and TLS / SSL 
+
+
+Use the .pem file to load security key stores.
+
+Use .jks file to load key stores
 
 ## RELATED LINKS
 
 [What is HARICA?](https://www.harica.gr/en/About/About)
-
 
 Oldie But Goodie:
 [HOWTO Generate Certs in Linux](https://www.linuxunbound.com/2015/03/digital-certificate-generation-and-openssl/)
