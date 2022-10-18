@@ -9,6 +9,9 @@
 
 How ot use the [Java Keytool](https://docs.oracle.com/en/java/javase/17/docs/specs/man/keytool.html) from Oracle.
 
+NOTES:
+Java itself accepts PKCS12, and JKS keystores.  You cannot use plain PEM.
+Using SleepyCat library allows the consumption of PEM with little code overhead.
 
 ## SECURITY RELATED RFC's
 
