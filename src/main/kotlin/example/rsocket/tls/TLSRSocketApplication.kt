@@ -10,10 +10,9 @@ import java.io.File
 class TLSRSocketApplication {
 
 	@Bean
-	fun secureClientConnection(@Value("\${spring.rsocket.server.ssl.trust-store}") trustStoreFile: File,
-							   @Value("\${spring.rsocket.server.ssl.key-store}") keyStoreFile: File,
+	fun secureClientConnection(@Value("\${spring.rsocket.client.ssl.trust-store}") trustStoreFile: File,
 							   @Value("\${spring.rsocket.server.ssl.key-store-password}") jksPass: String): PKITransportFactory =
-			PKITransportFactory(trustStoreFile, keyStoreFile, jksPass)
+			PKITransportFactory(trustStoreFile, jksPass)
 }
 
 fun main(args: Array<String>) {

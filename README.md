@@ -2,61 +2,64 @@
 
 This guide will help you configure TLS with your new or existing RSocket services using Spring Boot 2.7.x. We will review a few options for generating the cerficate, as well as importing and utilizing that certificate in your Spring Boot application.
 
-It is assumed the developer knows about Kotlin or at least JAVA 11 and uses Spring Boot. Dont worry if you're new to RSocket for Spring Boot or Reactive streams. All of the TLS security concerns relate to the Transport, not the protocol itself. Of course, the best place to understand are [the reference docs](https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#appendix.application-properties.rsocket), so please read them!
+It is assumed the developer knows about OpenSSL, Kotlin or at least JAVA 11 and uses Spring Boot. Dont worry if you're new to RSocket for Spring Boot or Reactive streams. All of the TLS security concerns relate to the Transport, not the protocol itself. Of course, the best place to understand are [the reference docs](https://docs.spring.io/spring-boot/docs/current/reference/htmlsingle/#appendix.application-properties.rsocket), so please read them!
 
 ## Background on the PKI
 
-SSL/TLS is a type of Public Key Infrastructure (PKI). Therefore PKI has the concept of a private and publy key pair. Writers of an encrypted message will use the private key to generate the encrypted bits. While readers (non trusted parties) can use the public portion to decrypt the message. Writers keep the private key private, while distributing public keys to readers.
+SSL/TLS is a type of Public Key Infrastructure. PKI have concepts of a private and public key pair. Servers of an encrypted message will use the private key to generate the encrypted bits. Meanwhile, clients (non-trusted parties) can use the public portion to decrypt the message. TWriters keep the private key private, while distributing public keys to readers. 
 
-### Keystore vs Truststore
+Certificates allow a server to establish a `chain-of-trust` with clients and other entities involved in the exchange of encrypted messages. This is 
 
-One thing to note is the terms 'keystore', 'truststore' seem to get conflated and infer different things depending on context. Lets start with a basic description of a keystore's relation to overall SSL/TLS certificate handling.  
+## Creating the Certificates
 
-A Keystore is a repostiory containing one or more Certificates and Crytographic keys. Usually used to contain a private key and the accompanying X.509 certificate of a server. A server uses the key in the keystore to generate encrypted messages and that identifies it's self along the chain of trust. Those encrypted messages must be trusted downstream, which brings us to the truststore.
+What is the procedure in creating a certificate? There are many steps here. First we need a Private Key, then we need to create a Certificate Signing Request (CSR) using that Private Key. Finally a third party Certificate Authority (CA) or our own enterprise will convert that CSR into a Certificate. This certificate should stay on the host that needs it. It should not get distributed to anyone else since at the logistics of managing a single self-signed key (that is untrusted by 3rd parties) is quite complex. 
 
-We can turn our self-signed certificate into a `PKCS12` formatted keystore:
+Alternatively we will create the private key, then generate a CA Root certificate to establish the `chain-of-trust`. This Root certificate gets distributed to all devices and software that will eventually handle a key signed by it. In this way, we act like common CA's like Verisign and Globalsign. The process for each individual certificate in this case, will have our own Root certificate to sign (application specific) our CSRs. This way as single applications come and go, there is no need to re-distribute keys. 
+
+Ultimately, we need to get the certificate(s) installed onto hosts in a format that our server/client/device can understand. Since we are securing an RSocket server, we have a couple options for that format: [JKS](https://vdc-download.vmware.com/vmwb-repository/dcr-public/93c0444e-a6cb-46a0-be25-b27a20f8c551/ac6ea73b-569b-4fff-80f1-e4144f541ac8/GUID-7FB0CDA2-BE63-49A4-B76C-BB806C3194AC.html) which is a JAVA specification for storing certificates, and [PKCS12](https://en.wikipedia.org/wiki/PKCS_12) which is the platform agnostic format.
+
+In this guide we will explore exporting keystores in the PKCS#12 format, on the premise that JKS being deprecated at a later date.
+
+### Generating our CA's Private Key
+
+The Root certificate will be distributed to any client/servers/browsers/devices, while the individual certificates will get managed on the hosts that they belong to. This way the chain-of-trust is established with the Root CA, and -contrast to self-signed certificates- we will not have to redeploy a certificate for each known use-case.
+
+To get started, we will need to generate the public/private key pair of our own CA. 
+
+Lets generate an RSA 2048-bit key pair for our Root certificate:
 ```bash
-openssl pkcs12 -export -out server.p12 -inkey self.key -in self.crt -certfile self.crt
+openssl genrsa -out ca.key 2048 -nodes -sha256
 ```
 
-A Truststore contains certificates from various Certified Authorities that verify the certificate presented by a server in an SSL connection. For example: should we have signed our Certificate by a known CA, our certificate would reflect this (signing by CA's private key) and our program would call out to our truststore to validate the identity of that signing CA.
-
-We can view the JKS formatted Java truststore with [Keytool](https://docs.oracle.com/javase/8/docs/technotes/tools/unix/keytool.html):
-```bash
-keytool -list -keystore $(/usr/libexec/java_home)/lib/security/cacerts
-```
-
-The output is all of the trusted CA certificate fingerprints. This allows Java to communicate with Internet PKI such as SSL via HTTP. Now, in the next sections, we move onto the topic of standing up an encrypted channel RSocket server and client!
-
-## Generating the Certificates
-
-What is the procedure in generating a certificate? There are many steps here. First we need a Private Key, then we need to create a Certificate Signing Request (CSR) using that Private Key. Finally a third party Certificate Authority (CA) else, or our own enterprise will convert that CSR into a Certificate. This certificate should stay on the host that needs it. It should not get distributed to anyone else since at the logistics of managing a single self-signed key (that is untrusted by 3rd parties) is quite complex. 
-
-Alternatively we will create the private key, then generate a CA ROOT certificate to establish the chain-of-trust. This ROOT certificate gets distributed to all devices and software that will eventually handle a key signed by it; it's like we're our own enterprise signing keys. The process for each individual certificate uses our own CA Root to sign the CSR's. This way as single applications come and go, there is no need to re-distribute keys. 
-
-In this guide we will explore both certificate creation options, then utilize our own CA Root to implement the TLS RSocket application.
-
-### Generating the Private Key
-
-A private key will usually get stored in [PEM]() format with the bits representing a the writer's crypto-algorithm choice such as DES, RSA2048, Blowfish, etc... Without going into too much detail, the private key _always_ stays with the creating entity. Since the Public Key is derived from the Private Key, our output private key file will contain the private/public key pair.
-
-Lets generate a key pair:
-```bash
-openssl genrsa -out self.key 2048
-```
-
-This tells openssl to generate a new RSA key 2048 bits long and store it in a file `self.key`. The resulting file is Base64 encoded.
+This tells openssl to generate a new RSA key 2048 bits long and store it in a file `ca.key`. The resulting file is Base64 encoded.
 
 You can even check and inspect the key:
+```bash
+openssl rsa -in ca.key -text -check
 ```
-openssl rsa -in self.key -text -check
+
+The output is somewhat lengthy and includes a status indicator of the key's validity, the HEXADECIMAL representation of the numeric key, and it's Base64 encoding. But next, we will use this key to create the Root certificate.
+
+### Create the Root Certificate
+
+Since we have the root key, we will create an X.509 certificate to be used in signing other keys.
+
+Using openssl, create the root certificate from the key generated earlier:
+```bash
+openssl req -x509 -new -nodes -key ca.key -passout pass:111111 -out ca.cer -days 365 -sha256 -subj "/CN=CARoot"
 ```
 
-The output is somewhat lengthy and includes a status indicator of the key's validity, the HEXADECIMAL representation of the numeric key, and it's Base64 encoding.
+The output is a file `ca.cer` containing the root X.509 certificate. Now for the fun part; lets create the server and client certificates signed by our Root CA!
 
-### Certificate Signing Request
+### Create the Server Certificate
 
-We will need to use that key in a certificate. Thus the [CSR](https://en.wikipedia.org/wiki/Certificate_signing_request) is a file containing the public key and some organizational metadata used to identify the originating entity. A signitory party (the CA) will use it's private key to sign your CSR upon success and an SSL certificate is the end-result of this CSR procedure.
+Now, we can begin the [CSR](https://en.wikipedia.org/wiki/Certificate_signing_request) process by generating a private key for the entity we wish to represent; In this case, an RSocket server. Let's generate the private key for the server:
+
+```bash
+openssl genrsa -out server.key 2048 -nodes -sha256
+```
+
+The CSR is a file containing a public key with some organizational metadata used to identify the originating entity. We will be the signing party that uses our Root certificate to sign a CSR. The resultant certificate will have the fingerprint of our Root, and establish a `chain-of-trust` with the server (or any other signed) certificate.
 
 The CSR will contain information about the requesting entity including:
 
@@ -67,46 +70,194 @@ The CSR will contain information about the requesting entity including:
 * Email
 * Expiry - Time of expiry for the certificate
 
-Create the Signing Request using our private key. The output is 'self.csr' containing the Base64 encoded [X.509](https://en.wikipedia.org/wiki/X.509) Certificate Request:
+We largely ignore the details of metadata in this guide. However, in specific cases, metadata is expected to appear with a formalized value such as FQDN having the local root of a domain name.  This demo doesn't require such measures beyond Common Name (CN) matching our use case, thus we will use 'Unknown' for every other metadata and put 'Server'/'Client' as the CN.
+
+We can now create the CSR file using the server's private key. The output is 'server.csr' containing the Base64 encoded Certificate Request:
 ```bash
-openssl req -new -key self.key -sha256 -out self.csr -subj "CN=localhost,OU=Unknown,O=Unknown,L=Unknown,ST=Unknown,C=Unknown"
+openssl req -new -key server.key -sha256 -out server.csr -subj "/CN=server,OU=Unknown,O=Unknown,L=Unknown,ST=Unknown,C=Unknown"
 ```
 
-Now, we need to get this CSR over to an Enterprise Certificate Authority or external CA (e.g. Verisign) for signing. This will ensure other parties see that a trusted 3rd party has guaranteed our public key. Alternatively, we will self-sign the CSR and produce our own Certificate.
+Now, we can sign the server's CSR with our Root certificate.
 
-### Signing Option 1: Self-Sign
+## Signing the Server Certificate
 
-The purpose of a certificates is to validate a public key is owned by the creating entity of the key without giving up the private key! This process occurs through a trusted CA (like Verisign) or an internal Enterprise CA, however for this example we will self-sign.
-
-The output is our self-signed SSL Certificate in 'self.crt':
-```bash
-openssl x509 -req -days 365 -in self.csr -signkey self.key -sha256 -out self.crt
-```
-
-Now, we need to get this certificate somewhere and in a format that our server can understand. We have a couple options for that format: [JKS](https://vdc-download.vmware.com/vmwb-repository/dcr-public/93c0444e-a6cb-46a0-be25-b27a20f8c551/ac6ea73b-569b-4fff-80f1-e4144f541ac8/GUID-7FB0CDA2-BE63-49A4-B76C-BB806C3194AC.html) which is a JAVA specification for storing certificates. Then there is [PKCS12](https://en.wikipedia.org/wiki/PKCS_12) which is the platform agnostic format.
-
-### Signing Option 2: Our own CA Root to the rescue
-
-This is a little more complex because instead of a self-signed Certificate, we will instead create a trusted CA of our own then sign certificates with it. The Root CA will be distributed to any client/servers/browsers/devices, while the individual certificates will get managed on the hosts that they belong to. This way the chain-of-trust is established with the RootCA, and we dont need to re-deploy a certificate for each known use-case.
-
-To do this, we can take our own Private key and generate a Root Certificate using OpenSSL:
+We can apply the server's Private key, the server's CSR and the Root certificate to generate the server's certificate:
 
 ```bash
-openssl req -x509 -new -key self.key -passout pass:111111 -out ca.cer -days 365 -sha256 -subj "/CN=CARoot" -nodes
+openssl x509 -req -CA ca.cer -CAkey ca.key -in server.csr -out server.pem -days 3650 -CAcreateserial -sha256
 ```
 
-Then, we can install this Root Certificate to the devices/service keystores needed. In this case, we can install the Root Certificate to the keystore that our application will use:
+** Notes about this command
+
+## Creating Key-stores 
+
+Now, we need to insert this certificate into a keystore that our Java app can understand. We have a couple options for keystore format: 
+
+* [JKS](https://vdc-download.vmware.com/vmwb-repository/dcr-public/93c0444e-a6cb-46a0-be25-b27a20f8c551/ac6ea73b-569b-4fff-80f1-e4144f541ac8/GUID-7FB0CDA2-BE63-49A4-B76C-BB806C3194AC.html) which is a JAVA specification for storing certificates. This format is probably going to get deprecated, so we'll use the next format.
+* [PKCS12](https://en.wikipedia.org/wiki/PKCS_12) which is the platform agnostic format and widely adopted standard.
+
+We will create a JKS keystore that contains our root and server certificates.
+
 ```bash
-keytool -import -keystore server-ts.jks -storetype JKS -storepass 111111 -keypass 111111 -noprompt -alias CARoot -file ca.cer
+cat ca.cer server.pem > serverca.pem
+openssl pkcs12 -export -in serverca.pem -inkey server.key -name localhost -password pass:111111 > server-ts.p12
 ```
 
-## Setup the RSocket Server
+If you already have your JKS keystore in tow, simply convert that keystore into PKCS12 using keytool:
 
-The server is a simple RSocket process. It only needs to respond to a message endpoint, and be encrypted along the way. 
+```bash
+keytool -importkeystore -srckeystore server-ts.jks -destkeystore server-ts.p12 -srcstoretype JKS -deststoretype PKCS12 -srcstorepass password -deststorepass password
+```
 
-## Add TLS
+Next, we will create a little RSocket server and apply TLS to it using our newly created keystore. We will explore the code options for both JKS and PKCS12.
+
+### Create the client trust-store (keystore)
+
+Usually, one will ship clients with just the Root certificate, as that will authenticate the server certificate per usual TLS fashion.
+We can make one for the client by exporting the Root certificate into a pkcs12 'trust-store' keystore.
+
+Create the client trust-store (keystore) file:
+```bash
+openssl pkcs12 -export -name localhost -in ca.cer -inkey ca.key -password pass:111111 > client-ts.p12
+```
+
+## A Spring Boot application
+
+The server is a simple RSocket process. It only needs to respond to a message endpoint, and be encrypted along the way. Lets begin at [start.spring.io](https://start.spring.io) and add code bits from there.
+
+Just one dependency - 'RSocket Messaging' is needed to get this going. Create the project and open it in your IDE. Otherwise, browse the [source code](https://github.com/Mario5Gray/rsocket-tls-spring-boot) here.
+
+![app start](images/start-spring-io.png)
+
+This application will expose a messaging endpoint that lets us exercise the TLS connectivity through RSocket. We just need a single controller to do the work:
+
+ControllerMapping.kt
+```kotlin
+package example.rsocket.tls
+
+import org.springframework.messaging.handler.annotation.MessageMapping
+import org.springframework.stereotype.Controller
+import reactor.core.publisher.Mono
+
+@Controller
+class ControllerMapping {
+    @MessageMapping("status")
+    fun status() = Mono.just(true)
+}
+```
+
+The RSocket messaging endpoint 'status' which return 'OK' will suffice our connectiity needs. Next, we need to TLS'ify the server.
+
+### Spring Boot RSocket/TLS support
+
+Let's add TLS to our RSocket Server by including some necessary paths and TLS related configuration options in `application.properties`:
+
+application.properties
+```properties
+spring.application.name=rsocket-tls
+spring.rsocket.server.port=9090
+spring.rsocket.server.ssl.enabled=true              
+spring.rsocket.server.ssl.client-auth=none           
+spring.rsocket.server.ssl.protocol=TLS               
+spring.rsocket.server.ssl.key-store=classpath:keystore/server.keystore.jks
+spring.rsocket.server.ssl.key-store-type=JKS       
+spring.rsocket.server.ssl.key-store-password=111111
+spring.rsocket.server.ssl.trust-store=classpath:keystore/server.truststore.jks
+spring.rsocket.server.ssl.trust-store-password=111111
+```
+
+So, this is the bulk of the TLS enabling code thats needed to secure the server with TLS. We specify that TLS v1.2 is used, where and what type our keystores are, and finally the password to access them.
+
+
+### Securing the client
+
+The client is a standard [RSocketRequester]() that uses TCP to transmit frames. We can lock down the TCP connection by creating a new instance of [TcpClientTransport]() and sending it to the Requester when we create it.  Lets take a look at client configuration for our TCPClientTransport below;
+
+```kotlin
+open class PKITransportFactory(private val trustFile: File,
+                               private val keyFile: File,
+                               private val jksPass: String) {
+
+    fun tcpClientTransport(host: String, port: Int): TcpClientTransport {
+
+        val trustManager = TrustManagerFactory
+                .getInstance(TrustManagerFactory.getDefaultAlgorithm())
+                .apply {
+                    val ks = KeyStore.getInstance("JKS").apply {
+                        this.load(FileInputStream(trustFile), jksPass.toCharArray())
+                    }
+                    this.init(ks)
+                }
+
+        return TcpClientTransport.create(
+                TcpClient.create()
+                        .host(host)
+                        .port(port)
+                        .secure { s ->
+                            s.sslContext(
+                                    SslContextBuilder
+                                            .forClient()
+                                            .keyStoreType("JKS")
+                                            .trustManager(trustManager)
+                                            .build()
+                            )
+                        })
+    }
+}
+```
 
 ## Test Securely/Un-Securely
+
+To test the validity of certificates and their positions in the keystore, we will write a couple of tests that
+certify client's trust-store matches the key given from server's keystore.
+
+First we will setup a test class:
+
+```kotlin
+@SpringBootTest
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class TlsRSocketApplicationTests {
+
+}
+```
+
+We will need to create the requester, and it's TCP connection:
+
+```kotlin
+	@Autowired
+	private lateinit var secureConnection: PKITransportFactory
+
+	private lateinit var requester: RSocketRequester
+
+	@BeforeAll
+	fun setupOnce(@Value("\${spring.rsocket.server.port}") port: Int) {
+		val securecon = secureConnection.tcpClientTransport("localhost", port)
+		requester = RSocketRequester.builder().transport(securecon)
+
+	}
+```
+
+Now, we can test the secure connection here:
+
+```kotlin
+	@Test
+	fun testRequestResponse() {
+		val req = requester
+				.route("status")
+				.retrieveMono<String>()
+
+		StepVerifier
+				.create(req)
+				.assertNext {
+					Assertions
+							.assertThat(it)
+							.isNotNull
+				}
+				.verifyComplete()
+	}
+```
+
+Running the tests show we are able to hit the 'status' endpoint fine.
 
 ## Closing and Next Steps
 
@@ -115,6 +266,8 @@ This guide provided guidance on securing your RSocket servers through TLS securi
 The next step in this topic will take advantage of [Spring Vault]() as a source of Key certificates. This should reduce the amount of time a developer spends in managing all the key types found in the server-scape.
 
 ## Information and Learning
+
+[Standard Cipher Names](https://docs.oracle.com/javase/9/docs/specs/security/standard-names.html)
 
 [SSL Self-signing guide](https://knowledge.broadcom.com/external/article/166370/how-to-create-a-selfsigned-ssl-certifica.html)
 

@@ -18,17 +18,13 @@ class TlsRSocketApplicationTests {
 	@Autowired
 	private lateinit var secureConnection: PKITransportFactory
 
-	@Autowired
-	private lateinit var builder: RSocketRequester.Builder
-
 	private lateinit var requester: RSocketRequester
 
 	@BeforeAll
 	fun setupOnce(@Value("\${spring.rsocket.server.port}") port: Int) {
 		//val insecureConn = TestInsecureSecureConnection().tcpClientTransport("localhost", port)
 		val securecon = secureConnection.tcpClientTransport("localhost", port)
-		requester = builder
-				.transport(securecon)
+		requester = RSocketRequester.builder().transport(securecon)
 
 	}
 
@@ -38,12 +34,12 @@ class TlsRSocketApplicationTests {
 
 	@Test
 	fun testRequestResponse() {
-		val first = requester
+		val req = requester
 				.route("status")
 				.retrieveMono<String>()
 
 		StepVerifier
-				.create(first)
+				.create(req)
 				.assertNext {
 					Assertions
 							.assertThat(it)
