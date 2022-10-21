@@ -7,5 +7,5 @@ import reactor.core.publisher.Mono
 @Controller
 class ControllerMapping {
     @MessageMapping("status")
-    fun status() = Mono.just(true)
+    fun status() = Mono.just("OK")
 }

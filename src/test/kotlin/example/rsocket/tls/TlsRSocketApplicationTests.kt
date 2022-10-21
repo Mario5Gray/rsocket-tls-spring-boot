@@ -15,37 +15,37 @@ import reactor.test.StepVerifier
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TlsRSocketApplicationTests {
 
-	@Autowired
-	private lateinit var secureConnection: PKITransportFactory
+    @Autowired
+    private lateinit var secureConnection: PKITransportFactory
 
-	private lateinit var requester: RSocketRequester
+    private lateinit var requester: RSocketRequester
 
-	@BeforeAll
-	fun setupOnce(@Value("\${spring.rsocket.server.port}") port: Int) {
-		//val insecureConn = TestInsecureSecureConnection().tcpClientTransport("localhost", port)
-		val securecon = secureConnection.tcpClientTransport("localhost", port)
-		requester = RSocketRequester.builder().transport(securecon)
+    @BeforeAll
+    fun setupOnce(@Value("\${spring.rsocket.server.port}") port: Int) {
+        val securecon = secureConnection.tcpClientTransport("localhost", port)
+        requester = RSocketRequester.builder().transport(securecon)
 
-	}
+    }
 
-	@Test
-	fun contextLoads() {
-	}
+    @Test
+    fun contextLoads() {
+    }
 
-	@Test
-	fun testRequestResponse() {
-		val req = requester
-				.route("status")
-				.retrieveMono<String>()
+    @Test
+    fun testStatusRoute() {
+        val req = requester
+                .route("status")
+                .retrieveMono<String>()
 
-		StepVerifier
-				.create(req)
-				.assertNext {
-					Assertions
-							.assertThat(it)
-							.isNotNull
-				}
-				.verifyComplete()
-	}
+        StepVerifier
+                .create(req)
+                .assertNext {
+                    Assertions
+                            .assertThat(it)
+                            .isNotNull
+                            .isEqualTo("OK")
+                }
+                .verifyComplete()
+    }
 
 }

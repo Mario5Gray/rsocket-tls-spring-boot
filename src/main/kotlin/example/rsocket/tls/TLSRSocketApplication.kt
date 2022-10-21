@@ -9,12 +9,12 @@ import java.io.File
 @SpringBootApplication
 class TLSRSocketApplication {
 
-	@Bean
-	fun secureClientConnection(@Value("\${spring.rsocket.client.ssl.trust-store}") trustStoreFile: File,
-							   @Value("\${spring.rsocket.server.ssl.key-store-password}") jksPass: String): PKITransportFactory =
-			PKITransportFactory(trustStoreFile, jksPass)
+    @Bean
+    fun secureClientConnection(@Value("\${my.ssl.trust-store}") trustStoreFile: File,
+                               @Value("\${my.ssl.trust-store-password}") jksPass: String): PKITransportFactory =
+            PKITransportFactory(trustStoreFile, jksPass)
 }
 
 fun main(args: Array<String>) {
-	runApplication<TLSRSocketApplication>(*args)
+    runApplication<TLSRSocketApplication>(*args)
 }
